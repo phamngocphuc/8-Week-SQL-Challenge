@@ -181,6 +181,8 @@ FROM runner_orders
 WHERE distance != 0
 GROUP BY runner_id;
 
+
+-- A. Pizza Metrics
 -- 1. How many pizzas were ordered ?
 SELECT COUNT(1) AS count_ordered 
 	FROM customer_orders_temp
@@ -260,6 +262,80 @@ JOIN case_study_2.runner_orders AS r
 WHERE r.distance IS NOT NULL 
 			AND TRIM('km' FROM r.distance)::FLOAT > 0
 GROUP BY c.customer_id
-ORDER BY c.customer_id
+ORDER BY c.customer_id	
 
 
+-- 8. How many pizzas  were delivered that had both exclusions and extras
+SELECT SUM(
+		CASE 
+		WHEN c.exclusions IS NOT NULL AND c.extras IS NOT NULL THEN 1
+		ELSE 0
+		END
+		) AS pizza_count_w_exclusions_extras
+FROM case_study_2.customer_orders AS c
+JOIN case_study_2.runner_orders as r
+	ON c.order_id = r.order_id
+WHERE r.distance IS NOT NULL AND TRIM('km' FROM r.distance)::FLOAT > 0
+	AND c.exclusions <> ''
+	AND c.extras <> ''
+
+
+-- 9. What is the total volume of pizza ordered for each hour of the day ?
+SELECT DATE_PART('hour', c.order_date) AS hour_of_day,
+		COUNT(c.order_id) AS pizza_count
+FROM case_study_2.customer_orders c
+GROUP BY DATE_PART('hour', c.order_date)
+
+
+-- 10. What is the volume of orders for each of the week
+SELECT TO_CHAR(c.order_date, 'DAY') AS day_of_week,
+		COUNT(c.order_id) AS count_order
+FROM case_study_2.customer_orders c
+GROUP BY TO_CHAR(c.order_date, 'DAY')
+
+
+-- B. Runner and Customer Experience
+-- 1. How many runners signed up for each 1 week period ?
+SELECT DATE_PART('WEEK', registration_date) AS registration_week,
+	COUNT(runner_id) AS runner_signup
+FROM case_study_2.runners
+GROUP BY DATE_PART('WEEK', registration_date)
+
+-- 2. What was the average time in minutes it took for each runner to arrive at the Pizza Runner HQ to pickup the order?
+WITH time_taken_cte AS (
+	SELECT 
+		c.order_id, 
+	    c.order_date, 
+	    r.pickup_time,
+		EXTRACT(EPOCH FROM (r.pickup_time::TIMESTAMP - c.order_date)) / 60 AS pickup_minutes
+	FROM case_study_2.customer_orders c
+	JOIN case_study_2.runner_orders r
+		ON c.order_id = r.order_id
+	WHERE r.distance IS NOT NULL AND TRIM('km' FROM r.distance)::FLOAT > 0
+	GROUP BY c.order_id, c.order_date, r.pickup_time
+)
+SELECT ROUND(AVG(pickup_minutes), 2)
+FROM time_taken_cte 
+WHERE pickup_minutes > 1;
+
+
+-- 3. Is there any relationship between the number of pizzas and how long the order takes to prepare?
+WITH prep_time_cte  AS (
+	SELECT 
+		c.order_id, 
+		COUNT(c.order_id) AS pizza_order, 
+	    c.order_date, 
+	    r.pickup_time,
+		EXTRACT(EPOCH FROM (r.pickup_time::TIMESTAMP - c.order_date)) / 60 AS prep_time_minutes
+	FROM case_study_2.customer_orders c
+	JOIN case_study_2.runner_orders r
+		ON c.order_id = r.order_id
+	WHERE r.distance IS NOT NULL AND TRIM('km' FROM r.distance)::FLOAT > 0
+	GROUP BY c.order_id, c.order_date, r.pickup_time
+)
+SELECT 
+  pizza_order, 	
+  ROUND(AVG(prep_time_minutes), 3) AS avg_prep_time_minutes
+FROM prep_time_cte
+WHERE prep_time_minutes > 1
+GROUP BY pizza_order;
