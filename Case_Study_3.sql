@@ -2676,3 +2676,102 @@ VALUES
   ('1000', '0', '2020-03-19'),
   ('1000', '2', '2020-03-26'),
   ('1000', '4', '2020-06-04');
+
+
+-- A. Customer Journey
+-- 1. Journey of 8 Customer (1,2,11,13,15,16,18,19) about subscriptions
+SELECT s.customer_id,
+	p.plan_id,
+	p.plan_name,
+	s.start_date
+FROM foodie_fi.subscriptions AS s
+JOIN foodie_fi.plans AS p 
+	ON s.plan_id = p.plan_id
+WHERE s.customer_id IN (1,2,11,13,15,16,18,19)
+
+
+-- B. Data Analysis Questions
+-- 1. How many customers has Foodie-Fi ever had ? 
+SELECT COUNT(DISTINCT s.customer_id) AS quantity_customer
+FROM foodie_fi.subscriptions AS s
+
+
+-- 2. What is the monthly distribution of trial plan start_date values for our dataset 
+-- use the start of the month as the group by value.
+SELECT p.plan_name,
+	DATE_PART('MONTH',s.start_date) AS month_numb,
+	TO_CHAR(s.start_date, 'MONTH') AS month_name,
+	EXTRACT('YEAR' FROM s.start_date) AS year,
+	COUNT(s.plan_id) AS trial_plan_subscriptions
+FROM foodie_fi.subscriptions AS s
+JOIN foodie_fi."plans" AS p 
+	ON s.plan_id = p.plan_id
+WHERE s.plan_id = 0
+GROUP BY p.plan_name, month_numb, month_name, year
+ORDER BY month_numb, year
+
+
+-- 3. What plan start_date values occur after the year 2020 for our dataset? 
+--	Show the breakdown by count of events for each plan_name.
+SELECT p.plan_id,
+	p.plan_name,
+	COUNT(s.customer_id) AS numb_events
+FROM foodie_fi.subscriptions AS s
+JOIN foodie_fi."plans" AS p
+	ON s.plan_id = p.plan_id
+WHERE s.start_date >= '2021-01-01'
+GROUP BY p.plan_id, p.plan_name
+ORDER BY p.plan_id
+
+
+-- 4. What is the customer count and percentage of customers who have churned rounded to 1 decimal place?
+SELECT COUNT(DISTINCT s.customer_id) AS churned_customers,
+	ROUND(100.0 * COUNT(DISTINCT s.customer_id) 
+			/ 
+		(SELECT COUNT(DISTINCT customer_id) FROM foodie_fi.subscriptions), 1) 
+	AS churn_percentage
+FROM foodie_fi.subscriptions AS s
+JOIN foodie_fi."plans" AS p
+	ON s.plan_id = p.plan_id
+WHERE p.plan_id = 4
+
+
+-- 5. How many customers have churned straight after their initial free trial 
+-- 	what percentage is this rounded to the nearest whole number?
+WITH ranked_cte AS (
+	SELECT s.customer_id,
+	p.plan_id,
+	ROW_NUMBER() OVER(
+					PARTITION BY s.customer_id 
+					ORDER BY s.start_date) 
+				AS row_num
+	FROM foodie_fi.subscriptions AS s
+	JOIN foodie_fi."plans" AS p
+		ON s.plan_id = p.plan_id
+)
+SELECT COUNT(1) AS churned_customers,
+	ROUND(100.0 * COUNT(1) 
+			/ 
+		 (SELECT COUNT(DISTINCT customer_id) FROM foodie_fi.subscriptions )
+	) AS churn_percentage
+FROM ranked_cte
+WHERE plan_id = 4 AND row_num = 2
+
+--
+-- Solution Using LEAD() window function:
+WITH ranked_cte AS (
+	SELECT s.customer_id,
+		p.plan_name,
+		LEAD(p.plan_name) OVER(PARTITION BY s.customer_id ORDER BY s.start_date) AS next_plan
+	FROM foodie_fi.subscriptions AS s 
+	JOIN foodie_fi."plans" AS p
+		ON s.plan_id = p.plan_id
+)
+SELECT  COUNT(1) AS churned_customers,
+		ROUND(100.0 * COUNT(1) 
+				/ 
+			 (SELECT COUNT(DISTINCT customer_id) FROM foodie_fi.subscriptions )
+		) AS churn_percentage
+FROM ranked_cte
+WHERE next_plan = 'churn'
+AND plan_name = 'trial'
